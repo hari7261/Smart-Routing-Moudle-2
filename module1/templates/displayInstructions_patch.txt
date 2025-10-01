@@ -1,0 +1,24 @@
+// Add this check to your displayInstructions function in index.html
+// ...existing code...
+function displayInstructions(legs) {
+    const instructionsDiv = document.getElementById('instructions');
+    instructionsDiv.innerHTML = '<h3>Route Instructions</h3>';
+    let instructionCount = 1;
+    legs.forEach(leg => {
+        if (leg.guidance && leg.guidance.instructions) {
+            leg.guidance.instructions.forEach(instruction => {
+                const instructionElement = document.createElement('div');
+                instructionElement.className = 'instruction';
+                instructionElement.innerHTML = `
+                    <span class="instruction-number">${instructionCount++}.</span>
+                    <span class="instruction-text">${instruction.message}</span>
+                    <span class="instruction-distance">${instruction.roadNumbers || ''} (${Math.round(instruction.routeOffsetInMeters)}m)</span>
+                `;
+                instructionsDiv.appendChild(instructionElement);
+            });
+        } else {
+            instructionsDiv.innerHTML += '<div>No instructions available for this route.</div>';
+        }
+    });
+}
+// ...existing code...

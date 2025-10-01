@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Driving Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Smart Driving Assistant</h1>
+        
+        <div class="controls">
+            <form id="routeForm">
+                <div class="input-group">
+                    <label>From:</label>
+                    <input type="text" name="start" placeholder="Enter city name or coordinates" required>
+                </div>
+                <div class="input-group">
+                    <label>To:</label>
+                    <input type="text" name="end" placeholder="Enter city name or coordinates" required>
+                </div>
+                <button type="submit">Analyze Route</button>
+            </form>
+        </div>
+
+        <div id="loading" style="display: none; text-align: center; padding: 20px;">
+            <p>Analyzing route... Please wait.</p>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+<script>
+    document.getElementById("routeForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const resultsDiv = document.getElementById("results");
+        const loadingDiv = document.getElementById("loading");
+        
+        // Show loading
+        loadingDiv.style.display = "block";
+        resultsDiv.innerHTML = "";
+        
+        try {
+            const response = await fetch("/api/analyze_route", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    start: formData.get("start"),
+                    end: formData.get("end")
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            // Hide loading
+            loadingDiv.style.display = "none";
+            
+            // Store route data for auto-refresh
+            lastRouteData = {
+                start: formData.get("start"),
+                end: formData.get("end")
+            };
+            
+            // Display results
+            displayResults(data);
+            
+            // Request location permission and update weather immediately
+            updateCurrentWeather();
+            
+            // Auto-refresh recommendations every 1 minute
+            setTimeout(() => {
+                refreshRecommendations();
+            }, 60000); // 60 seconds
+            
+        } catch (error) {
+            console.error("Error:", error);
+            loadingDiv.style.display = "none";
+            resultsDiv.innerHTML = 
+                `<div style="background-color: #ffebee; color: #c62828; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <h3>Error</h3>
+                    <p>${error.message}</p>
+                </div>`;
+        }
+    });
+
+    function displayResults(data) {
+        const resultsDiv = document.getElementById("results");
+        
+        let html = `
+            <div style="background-color: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin: 20px 0;">
+                <h2>Route Analysis Results</h2>
+                
+                <!-- Route Information -->
+                <div style="margin-bottom: 20px; padding: 15px; background-color: #e3f2fd; border-radius: 5px;">
+                    <h3 style="color: #1976d2; margin-top: 0;">📍 Route Details</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <strong>Distance:</strong><br>
+                            <span style="font-size: 1.2em; color: #1976d2;">${data.route.distance_km.toFixed(1)} km</span>
+                        </div>
+                        <div>
+                            <strong>Duration:</strong><br>
+                            <span style="font-size: 1.2em; color: #1976d2;">${Math.round(data.route.duration_min)} minutes</span>
+                        </div>
+                        <div>
+                            <strong>Traffic Delay:</strong><br>
+                            <span style="font-size: 1.2em; color: ${data.route.traffic_delay_sec > 300 ? '#d32f2f' : '#388e3c'};">
+                                ${Math.round(data.route.traffic_delay_sec / 60)} minutes
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather Information -->
+                <div class="weather-section" style="margin-bottom: 20px; padding: 15px; background-color: #f3e5f5; border-radius: 5px;">
+                    <h3 style="color: #7b1fa2; margin-top: 0;">🌤️ Weather Conditions <span style="font-size: 0.8em; color: #666;">(Auto-updated)</span></h3>
+                    <div class="weather-location" style="font-size: 0.9em; color: #666; margin-bottom: 10px;">
+                        Location: <span id="weather-city">Route waypoint</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                        <div>
+                            <strong>Temperature:</strong><br>
+                            <span style="font-size: 1.2em; color: #7b1fa2;">${data.weather.temp_c}°C</span>
+                        </div>
+                        <div>
+                            <strong>Conditions:</strong><br>
+                            <span style="font-size: 1.2em; color: #7b1fa2;">${data.weather.conditions}</span>
+                        </div>
+                        <div>
+                            <strong>Wind Speed:</strong><br>
+                            <span style="font-size: 1.2em; color: #7b1fa2;">${data.weather.wind_speed_kmh.toFixed(1)} km/h</span>
+                        </div>
+                        <div>
+                            <strong>Rain:</strong><br>
+                            <span style="font-size: 1.2em; color: #7b1fa2;">${data.weather.rain_mm} mm</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Suggestions -->
+                <div class="ai-suggestions" style="margin-bottom: 20px; padding: 15px; background-color: #e8f5e8; border-radius: 5px;">
+                    <h3 style="color: #2e7d32; margin-top: 0;">🤖 AI Driving Suggestions</h3>
+                    <div style="display: grid; gap: 15px;">
+                        <div>
+                            <strong>Recommended Speed:</strong><br>
+                            <span style="font-size: 1.2em; color: #2e7d32;">${data.suggestions.recommended_speed_kmh} km/h</span>
+                        </div>
+                        <div>
+                            <strong>Throttle Advice:</strong><br>
+                            <span style="color: #2e7d32;">${data.suggestions.throttle_advice}</span>
+                        </div>
+                        <div>
+                            <strong>Terrain Advice:</strong><br>
+                            <span style="color: #2e7d32;">${data.suggestions.terrain_advice}</span>
+                        </div>
+                        <div>
+                            <strong>Safety Message:</strong><br>
+                            <span style="color: #388e3c;">${data.suggestions.safety_message || ''}</span>
+                        </div>
+                        <div>
+                            <strong>Extra Tips:</strong><br>
+                            <span style="color: #1976d2;">${data.suggestions.extra_tips || ''}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Waypoints -->
+                <div style="padding: 15px; background-color: #fff3e0; border-radius: 5px;">
+                    <h3 style="color: #f57c00; margin-top: 0;">🗺️ Route Waypoints</h3>
+                    <div style="max-height: 200px; overflow-y: auto;">
+        `;
+
+        data.route.waypoints.forEach((waypoint, index) => {
+            html += `
+                <div style="padding: 8px; border-bottom: 1px solid #ffcc02; display: flex; justify-content: space-between;">
+                    <span><strong>Point ${index + 1}:</strong> ${waypoint.lat.toFixed(4)}, ${waypoint.lon.toFixed(4)}</span>
+                    <span style="color: #f57c00;">Speed Limit: ${waypoint.speed_limit.toFixed(0)} km/h</span>
+                </div>
+            `;
+        });
+
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+
+        resultsDiv.innerHTML = html;
+    }
+
+    // Auto-refresh function for recommendations
+    let lastRouteData = null;
+    let weatherUpdatePermission = null;
+    
+    async function requestLocationPermission() {
+        if (weatherUpdatePermission !== null) return weatherUpdatePermission;
+        
+        if (!navigator.geolocation) {
+            weatherUpdatePermission = false;
+            return false;
+        }
+        
+        try {
+            return new Promise((resolve) => {
+                // Show a user-friendly message
+                console.log("Requesting location permission for current weather...");
+                
+                navigator.geolocation.getCurrentPosition(
+                    () => {
+                        weatherUpdatePermission = true;
+                        console.log("Location permission granted!");
+                        resolve(true);
+                    },
+                    (error) => {
+                        weatherUpdatePermission = false;
+                        console.log("Location permission denied or failed:", error.message);
+                        resolve(false);
+                    },
+                    { timeout: 10000, enableHighAccuracy: false }
+                );
+            });
+        } catch (error) {
+            weatherUpdatePermission = false;
+            return false;
+        }
+    }
+    
+    async function getCurrentLocationWeather() {
+        if (!navigator.geolocation) return null;
+        
+        return new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        console.log("Getting weather for current location...");
+                        const response = await fetch(`/api/current_weather?lat=${position.coords.latitude}&lon=${position.coords.longitude}`);
+                        const data = await response.json();
+                        console.log("Current location weather data:", data);
+                        resolve(data);
+                    } catch (error) {
+                        console.error("Failed to get current weather:", error);
+                        resolve(null);
+                    }
+                },
+                (error) => {
+                    console.error("Geolocation error:", error);
+                    resolve(null);
+                },
+                { timeout: 10000, enableHighAccuracy: false }
+            );
+        });
+    }
+    
+    function refreshRecommendations() {
+        if (!lastRouteData) return;
+        
+        console.log("Auto-refreshing AI recommendations...");
+        
+        // Also update weather if permission granted
+        updateCurrentWeather();
+        
+        fetch("/api/analyze_route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                start: lastRouteData.start,
+                end: lastRouteData.end
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Update only the AI suggestions section
+            updateAISuggestions(data.suggestions);
+            
+            // Schedule next refresh
+            setTimeout(() => {
+                refreshRecommendations();
+            }, 60000);
+        })
+        .catch(error => {
+            console.error("Auto-refresh failed:", error);
+            // Retry in 1 minute anyway
+            setTimeout(() => {
+                refreshRecommendations();
+            }, 60000);
+        });
+    }
+    
+    function updateAISuggestions(suggestions) {
+        const suggestionsSection = document.querySelector('.ai-suggestions');
+        if (!suggestionsSection) return;
+        
+        suggestionsSection.innerHTML = `
+            <h3 style="color: #2e7d32; margin-top: 0;">🤖 AI Driving Suggestions <span style="font-size: 0.8em; color: #666;">(Auto-updated)</span></h3>
+            <div style="display: grid; gap: 15px;">
+                <div>
+                    <strong>Recommended Speed:</strong><br>
+                    <span style="font-size: 1.2em; color: #2e7d32;">${suggestions.recommended_speed_kmh} km/h</span>
+                </div>
+                <div>
+                    <strong>Throttle Advice:</strong><br>
+                    <span style="color: #2e7d32;">${suggestions.throttle_advice}</span>
+                </div>
+                <div>
+                    <strong>Terrain Advice:</strong><br>
+                    <span style="color: #2e7d32;">${suggestions.terrain_advice}</span>
+                </div>
+                <div>
+                    <strong>Safety Message:</strong><br>
+                    <span style="color: #388e3c;">${suggestions.safety_message || ''}</span>
+                </div>
+                <div>
+                    <strong>Extra Tips:</strong><br>
+                    <span style="color: #1976d2;">${suggestions.extra_tips || ''}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    async function updateCurrentWeather() {
+        console.log("Attempting to update current location weather...");
+        const hasPermission = await requestLocationPermission();
+        if (!hasPermission) {
+            console.log("Location permission not available, keeping route weather");
+            return;
+        }
+        
+        const weatherData = await getCurrentLocationWeather();
+        if (!weatherData) {
+            console.log("Failed to get current weather data");
+            return;
+        }
+        
+        console.log("Updating weather section with current location data");
+        updateWeatherSection(weatherData.weather, weatherData.city);
+    }
+    
+    function updateWeatherSection(weather, cityName) {
+        const weatherSection = document.querySelector('.weather-section');
+        if (!weatherSection) return;
+        
+        weatherSection.innerHTML = `
+            <h3 style="color: #7b1fa2; margin-top: 0;">🌤️ Weather Conditions <span style="font-size: 0.8em; color: #666;">(Auto-updated)</span></h3>
+            <div class="weather-location" style="font-size: 0.9em; color: #666; margin-bottom: 10px;">
+                Location: <span id="weather-city">${cityName || 'Current location'}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                <div>
+                    <strong>Temperature:</strong><br>
+                    <span style="font-size: 1.2em; color: #7b1fa2;">${weather.temp_c}°C</span>
+                </div>
+                <div>
+                    <strong>Conditions:</strong><br>
+                    <span style="font-size: 1.2em; color: #7b1fa2;">${weather.conditions}</span>
+                </div>
+                <div>
+                    <strong>Wind Speed:</strong><br>
+                    <span style="font-size: 1.2em; color: #7b1fa2;">${weather.wind_speed_kmh.toFixed(1)} km/h</span>
+                </div>
+                <div>
+                    <strong>Rain:</strong><br>
+                    <span style="font-size: 1.2em; color: #7b1fa2;">${weather.rain_mm} mm</span>
+                </div>
+            </div>
+        `;
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TomTom Navigation with Flask</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.1.2-public-preview.15/services/services-web.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>TomTom Navigation with Flask</h1>
+        
+        <div class="controls">
+            <div class="input-group">
+                <label for="start">Start:</label>
+                <input type="text" id="start" placeholder="Start location">
+            </div>
+            <div class="input-group">
+                <label for="end">End:</label>
+                <input type="text" id="end" placeholder="Destination">
+            </div>
+            <div class="input-group">
+                <label for="routeType">Route Type:</label>
+                <select id="routeType">
+                    <option value="fastest">Fastest</option>
+                    <option value="shortest">Shortest</option>
+                    <option value="eco">Eco</option>
+                    <option value="thrilling">Thrilling</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="traffic">Traffic:</label>
+                <select id="traffic">
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                </select>
+            </div>
+            <button id="calculateRoute">Calculate Route</button>
+        </div>
+        
+        <div id="map"></div>
+        <div id="instructions"></div>
+    </div>
+
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([51.505, -0.09], 13);
+        
+        // Add TomTom tiles (you can use other tile providers if you prefer)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        
+        // Variables to store markers and route
+        let startMarker, endMarker, routeLayer;
+        
+        // Calculate route button click handler
+        document.getElementById('calculateRoute').addEventListener('click', async () => {
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const routeType = document.getElementById('routeType').value;
+            const traffic = document.getElementById('traffic').value;
+            
+            if (!start || !end) {
+                alert('Please enter both start and end locations');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/calculate_route', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        start: start,
+                        end: end,
+                        routeType: routeType,
+                        traffic: traffic
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Process the route data
+                displayRoute(data);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to calculate route: ' + error.message);
+            }
+        });
+        
+        function displayRoute(routeData) {
+            // Clear previous route and markers
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+            }
+            if (startMarker) {
+                map.removeLayer(startMarker);
+            }
+            if (endMarker) {
+                map.removeLayer(endMarker);
+            }
+            
+            // Extract route points
+            const routes = routeData.routes;
+            if (!routes || routes.length === 0) {
+                throw new Error('No routes found');
+            }
+            
+            const legs = routes[0].legs;
+            const points = [];
+            
+            legs.forEach(leg => {
+                leg.points.forEach(point => {
+                    points.push([point.latitude, point.longitude]);
+                });
+            });
+            
+            // Draw the route on the map
+            routeLayer = L.polyline(points, {color: 'blue'}).addTo(map);
+            
+            // Add start and end markers
+            const startPoint = points[0];
+            const endPoint = points[points.length - 1];
+            
+            startMarker = L.marker(startPoint, {
+                icon: L.divIcon({
+                    className: 'start-marker',
+                    html: '🟢',
+                    iconSize: [20, 20]
+                })
+            }).addTo(map).bindPopup('Start');
+            
+            endMarker = L.marker(endPoint, {
+                icon: L.divIcon({
+                    className: 'end-marker',
+                    html: '🔴',
+                    iconSize: [20, 20]
+                })
+            }).addTo(map).bindPopup('Destination');
+            
+            // Fit the map to the route bounds
+            map.fitBounds(routeLayer.getBounds());
+            
+            // Display instructions
+            displayInstructions(legs);
+        }
+        
+        function displayInstructions(legs) {
+            const instructionsDiv = document.getElementById('instructions');
+            instructionsDiv.innerHTML = '<h3>Route Instructions</h3>';
+            let instructionCount = 1;
+            legs.forEach(leg => {
+                if (leg.guidance && leg.guidance.instructions) {
+                    leg.guidance.instructions.forEach(instruction => {
+                        const instructionElement = document.createElement('div');
+                        instructionElement.className = 'instruction';
+                        instructionElement.innerHTML = `
+                            <span class="instruction-number">${instructionCount++}.</span>
+                            <span class="instruction-text">${instruction.message}</span>
+                            <span class="instruction-distance">${instruction.roadNumbers || ''} (${Math.round(instruction.routeOffsetInMeters)}m)</span>
+                        `;
+                        instructionsDiv.appendChild(instructionElement);
+                    });
+                } else {
+                    instructionsDiv.innerHTML += '<div>No instructions available for this route.</div>';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
