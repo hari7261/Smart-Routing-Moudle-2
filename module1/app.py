@@ -8,7 +8,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Get TomTom API key from environment variable
-TOMTOM_API_KEY = os.getenv('TOMTOM_API_KEY', '8apa9iB3Hpwhh1LWONc8ZJ1TbGttgVDK')
+TOMTOM_API_KEY = os.getenv('TOMTOM_API_KEY', '')
 
 @app.route('/')
 def index():
